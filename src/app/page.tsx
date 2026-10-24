@@ -1,289 +1,372 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import PhoneWatchdog from "@/components/PhoneWatchdog";
-import ArchitectureGraph, { GraphNode } from "@/components/ArchitectureGraph";
-import VoiceCoach from "@/components/VoiceCoach";
-import TaskManager, { TaskItem } from "@/components/TaskManager";
 import { soundFX } from "@/lib/soundEffects";
 import { 
-  Shield, 
+  FileCode2, 
   Sparkles, 
-  Clock, 
-  Flame, 
   Volume2, 
-  Play, 
-  Pause, 
-  RotateCcw,
-  Radio,
-  FileCode2,
-  CheckCircle2
+  Mic, 
+  Send, 
+  CheckCircle2, 
+  AlertTriangle, 
+  FileText, 
+  History, 
+  Languages, 
+  UserCheck, 
+  GraduationCap,
+  Play,
+  Download,
+  ExternalLink
 } from "lucide-react";
 
-interface DistractionEvent {
+interface SessionState {
   id: string;
-  timestamp: string;
-  count: number;
+  files: string[];
+  linesAdded: number;
+  linesRemoved: number;
+  status: "building" | "briefing" | "awaiting_answer" | "answered" | "skipped";
+  summary: string;
+  risk: string;
+  anchor: string;
+  severity: "low" | "medium" | "high";
+  question: string;
+  options: string[];
+  answer: string;
+  adrPath: string;
+  adrContent: string;
 }
 
-const INITIAL_GRAPH_NODES: GraphNode[] = [
-  {
-    id: "node-1",
-    title: "1. User /login Route",
-    type: "completed",
-    description: "Accepts credentials, returns Access & Refresh Token pair with signed secret.",
-  },
-  {
-    id: "node-2",
-    title: "2. Token Rotation Handler",
-    type: "active",
-    description: "Validates incoming refresh token; currently generating in Cursor/Antigravity...",
-  },
-  {
-    id: "node-3",
-    title: "3. Revocation Blacklist",
-    type: "brainstormed",
-    description: "Redis in-memory store with 7-day TTL to block stolen or logged-out tokens.",
-  },
-];
+const DEMO_SESSION: SessionState = {
+  id: "8f2c41a0",
+  files: ["src/auth/rotate.ts", "src/auth/jwt.ts"],
+  linesAdded: 61,
+  linesRemoved: 8,
+  status: "awaiting_answer",
+  summary: "Antigravity just generated a refresh token rotation handler.",
+  risk: "Expired tokens are accepted without verifying the 'exp' claim in rotate.ts:44-58.",
+  anchor: "src/auth/rotate.ts:44-58",
+  severity: "high",
+  question: "When an expired refresh token arrives, should we reject it with 401 or silently reissue with a short grace window?",
+  options: [
+    "Reject with 401 and force re-login (Recommended)",
+    "Silent reissue with 60s grace window",
+    "Store in Redis blacklist with immediate alert"
+  ],
+  answer: "",
+  adrPath: "docs/adr/0001-reject-expired-refresh-tokens.md",
+  adrContent: `# 0001 — Reject expired refresh tokens instead of silently reissuing
 
-export default function DevBridgeDashboard() {
-  const [distractions, setDistractions] = useState<DistractionEvent[]>([]);
-  const [isSprintActive, setIsSprintActive] = useState(true);
-  const [sprintSeconds, setSprintSeconds] = useState(15 * 60);
-  const [isTimerRunning, setIsTimerRunning] = useState(true);
+- **Status:** accepted
+- **Date:** 2026-10-25
+- **Session:** 8f2c41a0
+- **Anchors:** src/auth/rotate.ts:44-58
 
-  // Active Task & Architecture Graph state
-  const [activeTask, setActiveTask] = useState<string>("JWT Token Rotation & Refresh Handler");
-  const [graphNodes, setGraphNodes] = useState<GraphNode[]>(INITIAL_GRAPH_NODES);
-  const [isPhoneDetected, setIsPhoneDetected] = useState(false);
+## Context
+Antigravity added a refresh handler that accepts any structurally valid token,
+including one that expired eight hours ago. Nothing in the write path checks \`exp\`.
 
-  // Real-time Workspace Watcher State
-  const [watcherStatus, setWatcherStatus] = useState<"connecting" | "active" | "error">("connecting");
-  const [recentFileChanges, setRecentFileChanges] = useState<{ path: string; type: string; timestamp: number }[]>([]);
+## Decision
+Expired tokens are rejected with 401 and the client re-authenticates. No silent reissue.
 
-  // 15-min countdown timer
-  useEffect(() => {
-    if (!isTimerRunning) return;
-    const interval = setInterval(() => {
-      setSprintSeconds((prev) => {
-        if (prev <= 1) {
-          soundFX.playRestored();
-          soundFX.speakAlert("Sprint complete! Great job maintaining focus.");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+## Consequences
+- A background tab wakes up logged out after a long sleep.
+- Token families cannot be extended indefinitely by a malicious client.
+- rotate.ts now needs an explicit expiry test in the auth suite.
 
-    return () => clearInterval(interval);
-  }, [isTimerRunning]);
+## Alternatives considered
+- Silent reissue with a short grace window — rejected: hides replay.
+- Redis blacklist — deferred: adds infrastructure before proof of need.`
+};
 
-  // Connect to Workspace File Watcher (SSE)
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource("/api/watcher");
+export default function DevBridgeHome() {
+  const [session, setSession] = useState<SessionState>(DEMO_SESSION);
+  const [register, setRegister] = useState<"beginner" | "pro">("beginner");
+  const [lang, setLang] = useState<"hi" | "en-IN">("hi");
+  const [voiceInput, setVoiceInput] = useState("");
+  const [isDictating, setIsDictating] = useState(false);
+  const [isDemoMode] = useState(true);
 
-      eventSource.addEventListener("connected", () => {
-        setWatcherStatus("active");
-      });
-
-      eventSource.addEventListener("file_change", (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          setRecentFileChanges((prev) => [data, ...prev.slice(0, 4)]);
-        } catch {
-          // parse error
-        }
-      });
-
-      eventSource.onerror = () => {
-        setWatcherStatus("error");
-      };
-    } catch {
-      setWatcherStatus("error");
+  // Play spoken briefing when session is in briefing state
+  const playSpokenBriefing = () => {
+    soundFX.unlockAudio();
+    if (lang === "hi") {
+      const hiText = register === "beginner"
+        ? "तुम्हारा AI 61 लाइन कोड लिख चुका है। ध्यान दो: rotate.ts में एक्सपायर्ड टोकन बिना चेक किए पास हो रहा है। सवाल: जब पुराना टोकन आए तो 401 रिजेक्ट करें या नया जारी करें?"
+        : "Antigravity just wrote 61 lines. Critical risk in rotate.ts line 44: expired tokens are accepted without exp check. Should we reject with 401 or reissue with grace?";
+      soundFX.speakAlert(hiText, "hi");
+    } else {
+      const enText = `Your AI just wrote 61 lines. Risk identified in rotate.ts line 44: expired tokens are accepted without verification. Should we reject with 401, or reissue with a grace window?`;
+      soundFX.speakAlert(enText, "en");
     }
-
-    return () => {
-      eventSource?.close();
-    };
-  }, []);
-
-  const formatTimer = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const handlePhoneDetected = (count: number) => {
-    setIsPhoneDetected(true);
-    const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    setDistractions((prev) => [
-      { id: Date.now().toString(), timestamp: timeStr, count },
-      ...prev.slice(0, 9),
-    ]);
+  const handleSelectOption = (option: string) => {
+    setVoiceInput(option);
+    handleSubmitAnswer(option);
   };
 
-  const handlePhoneCleared = () => {
-    setIsPhoneDetected(false);
-  };
+  const handleSubmitAnswer = (answerToSubmit?: string) => {
+    const finalAnswer = answerToSubmit || voiceInput;
+    if (!finalAnswer.trim()) return;
 
-  // When a spoken decision is confirmed in VoiceCoach, dynamically add it to the architecture graph!
-  const handleDecisionMade = (newDecisionNodeTitle: string) => {
-    setGraphNodes((prev) => [
+    soundFX.playRestored();
+    setSession((prev) => ({
       ...prev,
-      {
-        id: `node-${Date.now()}`,
-        title: `${prev.length + 1}. ${newDecisionNodeTitle}`,
-        type: "brainstormed",
-        description: "Agreed in Spoken Brainstorming session via Wispr Flow.",
-      },
-    ]);
+      status: "answered",
+      answer: finalAnswer,
+    }));
+
+    if (lang === "hi") {
+      soundFX.speakAlert("फैसला रिकॉर्ड हो गया। आर्किटेक्चर डिसिशन रिकॉर्ड docs/adr में सेव कर दिया गया है।", "hi");
+    } else {
+      soundFX.speakAlert("Decision recorded into docs/adr as an Architecture Decision Record.", "en");
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white font-sans">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md px-6 py-3">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md px-6 py-3">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-[0_0_20px_rgba(99,102,241,0.3)]">
-              <Shield className="h-5 w-5 text-white" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white font-bold shadow-lg shadow-indigo-500/20">
+              DB
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base font-extrabold tracking-tight text-white">DevBridge</h1>
-                <span className="rounded-md bg-purple-500/10 px-2 py-0.5 text-[10px] font-bold text-purple-400 border border-purple-500/20">
-                  VoiceAnchor
-                </span>
-                <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/20">
-                  v1.0 Ready
+                <h1 className="text-base font-extrabold text-white">DevBridge</h1>
+                <span className="rounded-md bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-400 border border-indigo-500/20">
+                  {isDemoMode ? "Demo Mode (Scripted)" : "Live Repository"}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                WeMakeDevs × Wispr Flow • Track 1: Builders
+                The build wait, spent on the code you just got.
               </p>
             </div>
           </div>
 
-          {/* Center Sprint Timer */}
-          <div className="flex items-center gap-3 bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-1.5 shadow-inner">
-            <Clock className="h-4 w-4 text-indigo-400 animate-pulse" />
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-xs text-slate-400 uppercase font-mono">Sprint:</span>
-              <span className="font-mono text-base font-bold text-white tracking-wider">
-                {formatTimer(sprintSeconds)}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 ml-2 border-l border-slate-800 pl-2">
+          {/* Controls: Register & Language */}
+          <div className="flex items-center gap-2.5">
+            {/* Language */}
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-0.5">
               <button
-                onClick={() => setIsTimerRunning((v) => !v)}
-                className="p-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-                title={isTimerRunning ? "Pause timer" : "Resume timer"}
+                onClick={() => setLang("hi")}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                  lang === "hi"
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
               >
-                {isTimerRunning ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                <Languages className="h-3 w-3" />
+                <span>हिंदी (लेखा)</span>
               </button>
               <button
-                onClick={() => setSprintSeconds(15 * 60)}
-                className="p-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-                title="Reset to 15m"
+                onClick={() => setLang("en-IN")}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                  lang === "en-IN"
+                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
               >
-                <RotateCcw className="h-3.5 w-3.5" />
+                <span>English (Rishi)</span>
               </button>
             </div>
-          </div>
 
-          {/* IDE Watcher Status & Test Sound */}
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-300">
-              <Radio className={`h-3 w-3 ${watcherStatus === "active" ? "text-emerald-400 animate-pulse" : "text-amber-400"}`} />
-              <span className="font-mono text-[11px]">
-                {watcherStatus === "active" ? "Cursor / IDE Sync: Connected" : "Watcher: Connecting"}
-              </span>
+            {/* Register */}
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+              <button
+                onClick={() => setRegister("beginner")}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                  register === "beginner"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <GraduationCap className="h-3 w-3" />
+                <span>Beginner</span>
+              </button>
+              <button
+                onClick={() => setRegister("pro")}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                  register === "pro"
+                    ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <UserCheck className="h-3 w-3" />
+                <span>Pro</span>
+              </button>
             </div>
-
-            <button
-              onClick={() => {
-                soundFX.playAlert();
-                soundFX.speakAlert("फोन नीचे रखो! कोड पर ध्यान दो।", "hi");
-              }}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <Volume2 className="h-3.5 w-3.5 text-indigo-400" />
-              <span>Test Audio (Lekha)</span>
-            </button>
           </div>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
-        {/* Top Full Width: Live Visual Architecture Graph */}
-        <ArchitectureGraph nodes={graphNodes} activeTaskTitle={activeTask} />
-
-        {/* 2-Column Split View: Voice Coach vs Vision Sentry & Multi-Task Manager */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Voice Coach & Brainstorming Hub (6 cols) */}
-          <div className="lg:col-span-6 flex flex-col gap-5">
-            <VoiceCoach
-              activeTaskTitle={activeTask}
-              isPhoneDetected={isPhoneDetected}
-              onDecisionMade={handleDecisionMade}
-            />
-
-            {/* Live IDE File Changes Feed */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl backdrop-blur-xl">
-              <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <FileCode2 className="h-4 w-4 text-indigo-400" />
-                  <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                    IDE Active File Stream (Cursor / Antigravity)
-                  </h4>
-                </div>
-                <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" /> Live
-                </span>
-              </div>
-
-              <div className="mt-3 space-y-1.5">
-                {recentFileChanges.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-2 italic text-center">
-                    Waiting for code edits in project directory...
-                  </p>
-                ) : (
-                  recentFileChanges.map((change, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between rounded-lg border border-slate-800/80 bg-slate-900/60 px-3 py-1.5 text-xs font-mono"
-                    >
-                      <span className="text-slate-300 truncate max-w-[260px]">{change.path}</span>
-                      <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-bold text-indigo-300 uppercase">
-                        {change.type}
-                      </span>
-                    </div>
-                  ))
-                )}
+      {/* Hero Banner (First 60s Judge Path) */}
+      <section className="border-b border-slate-800 bg-slate-900/30 py-4 px-6">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <FileCode2 className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">
+                Your AI just wrote <span className="text-indigo-400 font-bold">{session.linesAdded} lines</span> across {session.files.length} files. Here is what matters:
+              </p>
+              <div className="flex items-center gap-2 text-xs text-slate-400 font-mono mt-0.5">
+                <span>Session #{session.id}</span>
+                <span>•</span>
+                <span>Anchor: <span className="text-amber-400 underline">{session.anchor}</span></span>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Vision Sentry & Multi-Task Manager (6 cols) */}
-          <div className="lg:col-span-6 flex flex-col gap-5">
-            {/* Phone Watchdog (Vision Sentry) */}
-            <PhoneWatchdog
-              isActive={isSprintActive}
-              onPhoneDetected={handlePhoneDetected}
-              onPhoneCleared={handlePhoneCleared}
-            />
+          <button
+            onClick={playSpokenBriefing}
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition-colors"
+          >
+            <Volume2 className="h-3.5 w-3.5" />
+            <span>Hear Briefing ({lang === "hi" ? "लेखा" : "Rishi"})</span>
+          </button>
+        </div>
+      </section>
 
-            {/* Voice Multi-Task Manager */}
-            <TaskManager
-              activeTaskId="task-1"
-              onActiveTaskChange={(task: TaskItem) => {
-                setActiveTask(task.title);
-              }}
-            />
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-6xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Briefing & Question (7 cols) */}
+        <div className="lg:col-span-7 flex flex-col gap-5">
+          {/* 1. Grounded Briefing Card */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 flex flex-col gap-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+                <h2 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
+                  1. Grounded Code Briefing
+                </h2>
+              </div>
+              <span className="rounded bg-red-500/10 border border-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-400 uppercase font-mono">
+                {session.severity} severity
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              {register === "beginner"
+                ? "तुम्हारे AI ने rotate.ts में टोकन रोटेशन कोड तो लिख दिया, लेकिन इसमें एक छुपा हुआ रिस्क है।"
+                : session.summary}
+            </p>
+
+            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 flex items-start gap-2.5">
+              <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-300">
+                  Risk at {session.anchor}:
+                </p>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  {register === "beginner"
+                    ? "एक्सपायर हो चुका टोकन भी बिना चेक किए पास हो रहा है। कोई भी एक्सपायर्ड टोकन यूज करके लॉग-इन रह सकता है।"
+                    : session.risk}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Anchored Question & Voice Response */}
+          <div className="rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-indigo-400" />
+                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
+                  2. Exactly One Decision Question
+                </h3>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono">
+                Answer by Voice via Wispr
+              </span>
+            </div>
+
+            <p className="text-sm font-bold text-white leading-relaxed">
+              {register === "beginner"
+                ? "जब कोई एक्सपायर हुआ टोकन आए, तो सिस्टम को तुरंत रिजेक्ट करके 401 एरर देना चाहिए या चुपचाप नया टोकन दे देना चाहिए?"
+                : session.question}
+            </p>
+
+            {/* Suggested Options */}
+            <div className="space-y-2">
+              {session.options.map((opt, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSelectOption(opt)}
+                  disabled={session.status === "answered"}
+                  className={`w-full rounded-xl border p-3 text-left text-xs transition-all flex items-center justify-between ${
+                    session.answer === opt
+                      ? "border-emerald-500 bg-emerald-950/20 text-emerald-300 ring-1 ring-emerald-500/50"
+                      : "border-slate-800 bg-slate-950/60 hover:border-indigo-500/40 hover:bg-slate-900 text-slate-300"
+                  }`}
+                >
+                  <span>{opt}</span>
+                  {session.answer === opt && (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Wispr Voice Input / Freeform */}
+            <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={voiceInput}
+                  onChange={(e) => setVoiceInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSubmitAnswer();
+                  }}
+                  placeholder="Hold Wispr key or dictate your answer: 'Reject with 401'..."
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <button
+                onClick={() => handleSubmitAnswer()}
+                disabled={!voiceInput.trim()}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white shrink-0 transition-colors"
+                title="Save Decision"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Persisted Architecture Decision Record (ADR) (5 cols) */}
+        <div className="lg:col-span-5 flex flex-col gap-5">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 flex-1 flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-emerald-400" />
+                <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
+                  Persisted Decision Record
+                </h3>
+              </div>
+              <span className="rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400 font-mono">
+                docs/adr/
+              </span>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span className="truncate max-w-[220px]">{session.adrPath}</span>
+              <span className="text-emerald-400 font-semibold">Saved in Repo</span>
+            </div>
+
+            {/* ADR Markdown Preview */}
+            <div className="mt-3 flex-1 rounded-xl border border-slate-800 bg-slate-950 p-3.5 overflow-y-auto max-h-[420px] font-mono text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap select-text">
+              {session.adrContent}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Next Cursor prompt inherits this decision</span>
+              <span className="text-indigo-400 font-mono font-medium">CONSTRAINTS.md updated</span>
+            </div>
           </div>
         </div>
       </main>
