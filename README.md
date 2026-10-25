@@ -91,8 +91,8 @@ sequenceDiagram
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/rajan321123/wispr.git
-cd wispr
+git clone https://github.com/aiwithrajan/devbridge.git
+cd devbridge
 
 # 2. Install dependencies
 npm install
