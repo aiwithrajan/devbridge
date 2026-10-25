@@ -4,51 +4,75 @@ import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { 
   Play, Pause, RotateCcw, Download, CheckCircle2, Mic, 
-  Terminal, ShieldCheck, ArrowRight, Volume2, Sparkles 
+  Terminal, ShieldCheck, Volume2, Sparkles, VolumeX 
 } from "lucide-react";
 
 interface Beat {
   id: number;
   title: string;
+  shortTitle: string;
   subtitle: string;
-  duration: number; // in seconds
+  voiceText: string;
+  lang: string;
+  speaker: string;
+  pauseAfter: number;
   component: string;
 }
 
 const BEATS: Beat[] = [
   {
-    id: 1,
-    title: "The Build Wait Dilemma",
-    subtitle: "AI coding tools take 60–90s to build. Developers tab away and merge 60+ unread lines.",
-    duration: 6,
+    id: 0,
+    title: "Beat 1/5: The Build Wait",
+    shortTitle: "Beat 1: The Build Wait",
+    subtitle: "When developers prompt AI coding tools, the 60-90s wait leaves code unreviewed.",
+    voiceText: "When developers prompt AI coding tools like Cursor or Antigravity, the build wait takes 60 to 90 seconds. We tab away, lose focus, and merge 60 unreviewed lines into production.",
+    lang: "en-US",
+    speaker: "Narrator",
+    pauseAfter: 1200,
     component: "problem",
   },
   {
-    id: 2,
-    title: "Grounded Spoken Briefing",
+    id: 1,
+    title: "Beat 2/5: Spoken Diff Briefing",
+    shortTitle: "Beat 2: Spoken Diff Briefing",
     subtitle: "DevBridge catches landed diffs and speaks the exact file:line architectural risk.",
-    duration: 8,
+    voiceText: "DevBridge turns the wait into a spoken code review. It detected 64 lines in rotate dot ts. Line 44 accepts expired tokens without checking the exp claim. Should we reject past expiration or allow grace window?",
+    lang: "en-US",
+    speaker: "DevBridge Voice",
+    pauseAfter: 1400,
     component: "diff",
   },
   {
-    id: 3,
-    title: "Hands-Free Voice Dictation",
-    subtitle: "Developer answers via Wispr Flow in Hindi / Hinglish. 1.5s silence auto-submits.",
-    duration: 7,
+    id: 2,
+    title: "Beat 3/5: Hands-Free Voice Dictation",
+    shortTitle: "Beat 3: Voice Dictation",
+    subtitle: "Developer speaks via Wispr Flow in Hindi. 1.5s silence auto-submits.",
+    voiceText: "401 reject kardo, client ko dobara login karna chahiye.",
+    lang: "hi-IN",
+    speaker: "Developer (Wispr Flow)",
+    pauseAfter: 1500,
     component: "voice",
   },
   {
-    id: 4,
-    title: "Permanent ADR Committed to Git",
-    subtitle: "Generates real Architecture Decision Record in docs/adr/ and updates CONSTRAINTS.md.",
-    duration: 7,
+    id: 3,
+    title: "Beat 4/5: Real ADR Committed",
+    shortTitle: "Beat 4: ADR Committed to Git",
+    subtitle: "Generates permanent Architecture Decision Record in docs/adr/ and updates CONSTRAINTS.md.",
+    voiceText: "Architecture decision accepted. Expired tokens strictly return 401. ADR 0001 committed to repository, updating constraints for future prompts.",
+    lang: "en-US",
+    speaker: "DevBridge System",
+    pauseAfter: 1400,
     component: "adr",
   },
   {
-    id: 5,
-    title: "Verified Wispr Telemetry",
-    subtitle: "Tracks every word dictated, review sessions, and audio duration for leaderboard.",
-    duration: 6,
+    id: 4,
+    title: "Beat 5/5: Verified Telemetry",
+    shortTitle: "Beat 5: Verified Telemetry",
+    subtitle: "Tracks every word dictated, review sessions, and audio duration for hackathon.",
+    voiceText: "All telemetry is verified and saved to the Wispr Flow insights card. Zero keystrokes required. The build wait, spent on the code you just got.",
+    lang: "en-US",
+    speaker: "DevBridge Summary",
+    pauseAfter: 2000,
     component: "telemetry",
   },
 ];
@@ -56,55 +80,108 @@ const BEATS: Beat[] = [
 export default function DemoVideoStudio() {
   const [currentBeatIdx, setCurrentBeatIdx] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  const [speechEnabled, setSpeechEnabled] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedBlobUrl, setRecordedBlobUrl] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentBeat = BEATS[currentBeatIdx];
-  const totalDuration = BEATS.reduce((acc, b) => acc + b.duration, 0);
 
-  // Auto-play timer
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isPlaying) {
-      timer = setInterval(() => {
-        setElapsed((prev) => {
-          const next = prev + 0.1;
-          // Calculate beat
-          let accum = 0;
-          for (let i = 0; i < BEATS.length; i++) {
-            accum += BEATS[i].duration;
-            if (next <= accum) {
-              if (currentBeatIdx !== i) setCurrentBeatIdx(i);
-              return next;
-            }
-          }
-          // Reached end
+  // Best voice picker
+  const getBestVoice = (lang: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return null;
+    if (lang === "hi-IN") {
+      const hi = voices.find(v => v.lang.startsWith("hi") || v.name.includes("Lekha") || v.name.includes("Hindi"));
+      if (hi) return hi;
+    }
+    const pref = voices.find(v => v.name.includes("Samantha") || v.name.includes("Daniel") || v.name.includes("Karen") || (v.lang === "en-US" && !v.name.includes("Google")));
+    return pref || voices.find(v => v.lang.startsWith("en")) || voices[0];
+  };
+
+  const stopAudio = () => {
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const playBeatSequence = (idx: number) => {
+    stopAudio();
+    setCurrentBeatIdx(idx);
+    const beat = BEATS[idx];
+
+    if (!isPlaying) return;
+
+    if (speechEnabled && typeof window !== "undefined" && "speechSynthesis" in window) {
+      const utter = new SpeechSynthesisUtterance(beat.voiceText);
+      utter.rate = beat.lang === "hi-IN" ? 0.95 : 1.05;
+      const voice = getBestVoice(beat.lang);
+      if (voice) utter.voice = voice;
+
+      utter.onend = () => {
+        if (idx < BEATS.length - 1) {
+          transitionTimerRef.current = setTimeout(() => {
+            playBeatSequence(idx + 1);
+          }, beat.pauseAfter);
+        } else {
           setIsPlaying(false);
           if (isRecording) stopRecording();
-          return totalDuration;
-        });
-      }, 100);
-    }
-    return () => clearInterval(timer);
-  }, [isPlaying, currentBeatIdx, isRecording, totalDuration]);
+        }
+      };
 
-  const handlePlayPause = () => {
-    if (elapsed >= totalDuration) {
-      setElapsed(0);
+      utter.onerror = () => {
+        if (idx < BEATS.length - 1) {
+          transitionTimerRef.current = setTimeout(() => playBeatSequence(idx + 1), 4000);
+        }
+      };
+
+      window.speechSynthesis.speak(utter);
+    } else {
+      transitionTimerRef.current = setTimeout(() => {
+        if (idx < BEATS.length - 1) {
+          playBeatSequence(idx + 1);
+        } else {
+          setIsPlaying(false);
+          if (isRecording) stopRecording();
+        }
+      }, 5000);
+    }
+  };
+
+  useEffect(() => {
+    if (isPlaying) {
+      playBeatSequence(currentBeatIdx);
+    } else {
+      stopAudio();
+    }
+    return () => stopAudio();
+  }, [isPlaying]);
+
+  const togglePlay = () => {
+    if (currentBeatIdx >= BEATS.length - 1) {
       setCurrentBeatIdx(0);
     }
     setIsPlaying(!isPlaying);
   };
 
   const handleRestart = () => {
+    stopAudio();
     setIsPlaying(false);
-    setElapsed(0);
     setCurrentBeatIdx(0);
+  };
+
+  const jumpToBeat = (idx: number) => {
+    stopAudio();
+    setCurrentBeatIdx(idx);
+    if (isPlaying) {
+      playBeatSequence(idx);
+    }
   };
 
   const startRecording = async () => {
@@ -135,7 +212,7 @@ export default function DemoVideoStudio() {
       setIsPlaying(true);
     } catch (err) {
       console.error("Recording error:", err);
-      alert("Screen capture recording permission needed or browser does not support captureStream.");
+      alert("Screen capture recording permission needed.");
     }
   };
 
@@ -158,10 +235,10 @@ export default function DemoVideoStudio() {
             <h1 className="text-sm font-semibold tracking-wide flex items-center gap-2">
               DevBridge Demo Studio
               <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                1080p Video Mode
+                1080p Event-Driven Video
               </span>
             </h1>
-            <p className="text-xs text-slate-400">Automated Beat-by-Beat Video Walkthrough for Hackathon Submission</p>
+            <p className="text-xs text-slate-400">Natural Audio Narration & Seamless Scene Transitions</p>
           </div>
         </div>
 
@@ -203,9 +280,16 @@ export default function DemoVideoStudio() {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Beat {currentBeat.id}/5 : {currentBeat.title}
+            <div className="flex items-center gap-3">
+              {isPlaying && (
+                <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  {currentBeat.speaker} Speaking
+                </div>
+              )}
+              <div className="text-xs font-mono text-amber-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded">
+                {currentBeat.title}
+              </div>
             </div>
           </div>
 
@@ -262,7 +346,7 @@ export default function DemoVideoStudio() {
                     Wispr Flow Multilingual Capture
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                    Hindi / Hinglish Dictation
+                    Hindi Dictation
                   </span>
                 </div>
                 <div className="p-4 rounded-xl bg-black/70 border border-amber-500/20">
@@ -333,32 +417,31 @@ export default function DemoVideoStudio() {
 
         {/* Timeline & Player Controls */}
         <div className="w-full max-w-4xl mt-6 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-          {/* Progress Timeline */}
+          {/* Progress Timeline with Segmented Beats */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-mono text-slate-400">
-              <span>{elapsed.toFixed(1)}s</span>
-              <span className="text-slate-300 font-medium">{currentBeat.title}</span>
-              <span>{totalDuration}s</span>
+              <span>Beat {currentBeatIdx + 1} of 5</span>
+              <span className="text-slate-300 font-medium">{currentBeat.shortTitle}</span>
+              <span>100% Completion</span>
             </div>
-            <div className="h-2 rounded-full bg-slate-800 overflow-hidden flex">
-              {BEATS.map((beat, idx) => {
-                const widthPercent = (beat.duration / totalDuration) * 100;
-                const isPast = idx < currentBeatIdx;
-                const isCurrent = idx === currentBeatIdx;
-                return (
+            <div className="flex gap-1.5 h-2">
+              {BEATS.map((beat, idx) => (
+                <div
+                  key={beat.id}
+                  onClick={() => jumpToBeat(idx)}
+                  className="flex-1 bg-slate-800 rounded-full overflow-hidden cursor-pointer"
+                >
                   <div
-                    key={beat.id}
-                    style={{ width: `${widthPercent}%` }}
-                    className={`h-full border-r border-slate-950 transition-colors ${
-                      isPast
-                        ? "bg-amber-500"
-                        : isCurrent
-                        ? "bg-gradient-to-r from-amber-500 to-orange-500 animate-pulse"
-                        : "bg-slate-800"
+                    className={`h-full transition-all duration-300 ${
+                      idx < currentBeatIdx
+                        ? "bg-amber-500 w-full"
+                        : idx === currentBeatIdx
+                        ? "bg-gradient-to-r from-amber-500 to-orange-500 w-full animate-pulse"
+                        : "w-0"
                     }`}
                   />
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -366,7 +449,7 @@ export default function DemoVideoStudio() {
           <div className="flex items-center justify-between pt-2">
             <div className="flex items-center gap-2">
               <button
-                onClick={handlePlayPause}
+                onClick={togglePlay}
                 className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 font-medium text-white text-xs flex items-center gap-2 shadow-lg shadow-orange-600/20 transition-all"
               >
                 {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -378,6 +461,13 @@ export default function DemoVideoStudio() {
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Restart
+              </button>
+              <button
+                onClick={() => setSpeechEnabled(!speechEnabled)}
+                className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 text-xs flex items-center gap-1.5"
+              >
+                {speechEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                Voiceover: {speechEnabled ? "ON" : "OFF"}
               </button>
             </div>
 
