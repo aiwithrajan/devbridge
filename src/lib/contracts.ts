@@ -98,3 +98,101 @@ export const DecisionSchema = z.object({
 });
 
 export type Decision = z.infer<typeof DecisionSchema>;
+
+// ==========================================
+// 3. UI data shapes for the frontend (PROMPT_FOR_UI_DEV.md)
+// ==========================================
+
+export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
+export type Severity = (typeof SEVERITIES)[number];
+
+export interface DiffHunk {
+  file: string;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+}
+
+export interface ParsedDiff {
+  files: string[];
+  linesAdded: number;
+  linesRemoved: number;
+  hunks: DiffHunk[];
+  summary: string;
+  risk: string;
+  anchor: string; // "src/auth/rotate.ts:44-58"
+  severity: Severity;
+  question: string;
+  options: string[];
+  why_now: string;
+  sessionId: string;
+}
+
+export interface AdrRequest {
+  title?: string;
+  context?: string;
+  decision: string;
+  consequences?: string[];
+  alternatives?: string[];
+  anchors?: string[];
+  rawSpeech?: string;
+  sessionId?: string;
+}
+
+export interface AdrResponse {
+  success: boolean;
+  fileName: string;
+  path: string;
+  content: string;
+  fileSavedOnDisk: boolean;
+  constraintsUpdated?: boolean;
+}
+
+/* ---- Local UI state shapes ---- */
+
+export type SessionStatus =
+  | "idle"
+  | "building"
+  | "briefing"
+  | "question"
+  | "answered"
+  | "skipped"
+  | "error";
+
+export interface SessionRecord {
+  id: string;
+  status: SessionStatus;
+  files: string[];
+  linesAdded: number;
+  linesRemoved: number;
+  createdAt: number;
+  question?: string;
+  decision?: string;
+  adrPath?: string;
+}
+
+export interface DecisionNode {
+  id: string;
+  anchor: string;
+  file: string;
+  question: string;
+  decision: string;
+  adrPath: string;
+  createdAt: number;
+}
+
+export interface Telemetry {
+  waitMsSaved: number;
+  decisionsCaptured: number;
+  sessionsSeen: number;
+  avgDecisionLatencyMs: number;
+  rawMetrics: string[];
+}
+
+export const EMPTY_TELEMETRY: Telemetry = {
+  waitMsSaved: 0,
+  decisionsCaptured: 0,
+  sessionsSeen: 0,
+  avgDecisionLatencyMs: 0,
+  rawMetrics: [],
+};
