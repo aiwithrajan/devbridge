@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-// API Route: Persist ADR and append to .devbridge/decisions.jsonl
+// API Route: Persist ADR, append to .devbridge/decisions.jsonl, and update CONSTRAINTS.md (FR-12, FR-13, FR-14)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -97,6 +97,19 @@ ${alternatives.map((a: string) => `- ${a}`).join("\n")}
         JSON.stringify(metric) + "\n",
         "utf8"
       );
+
+      // Update CONSTRAINTS.md (FR-14)
+      const constraintsPath = path.join(process.cwd(), "CONSTRAINTS.md");
+      const constraintLine = `- [ADR-0001](${adrRelativePath}): ${decision}\n`;
+      if (!fs.existsSync(constraintsPath)) {
+        const header = `# Repository Architectural Constraints (DevBridge Generated)\n\nCursor and Antigravity inherit these constraints for future generations.\n\n`;
+        fs.writeFileSync(constraintsPath, header + constraintLine, "utf8");
+      } else {
+        const existing = fs.readFileSync(constraintsPath, "utf8");
+        if (!existing.includes(adrRelativePath)) {
+          fs.appendFileSync(constraintsPath, constraintLine, "utf8");
+        }
+      }
 
       fileSavedOnDisk = true;
     } catch (diskErr) {
