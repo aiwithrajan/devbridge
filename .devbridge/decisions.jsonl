@@ -1,0 +1,1 @@
+{"session_id":"8f2c41a0","timestamp":"2026-10-24T21:08:54.666Z","adr_path":"docs/adr/0001-reject-expired-refresh-tokens-instead-of.md","decision":"Expired tokens are strictly rejected with 401 and client must re-authenticate.","spoken_input":"401 se reject kardo re-login mandatory karo"}

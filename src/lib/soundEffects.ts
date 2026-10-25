@@ -1,4 +1,4 @@
-// Robust Web Audio + Native macOS Indian Voices (Lekha for Hindi, Rishi for Indian English)
+// Robust Web Audio + Native macOS Apple Indian Voices (Rishi for en-IN, Lekha for hi-IN) + Browser SpeechSynthesis fallback
 
 class SoundFX {
   private ctx: AudioContext | null = null;
@@ -94,21 +94,24 @@ class SoundFX {
     }
   }
 
-  // Speaks using native macOS Indian voices (Lekha for Hindi, Rishi for Indian English)
-  async speakAlert(text: string, lang: "hi" | "en" = "hi") {
-    // 1. Try native macOS server voice first (produces 100% natural Apple Lekha/Rishi voice)
+  // Speaks using native Apple Indian voices or Browser Web Speech API
+  async speakAlert(text: string, lang: "hi" | "en" = "en") {
+    // 1. Try native macOS server voice first (if running on local Mac)
     try {
       const res = await fetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, lang }),
       });
-      if (res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.localAudio === true) {
+        return;
+      }
     } catch {
       // fallback to browser Web Speech API
     }
 
-    // 2. Browser SpeechSynthesis Fallback
+    // 2. Browser SpeechSynthesis Fallback (works on Vercel and all hosted browsers)
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     try {
       this.unlockAudio();
@@ -121,18 +124,17 @@ class SoundFX {
 
         const voices = window.speechSynthesis.getVoices();
         if (voices.length > 0) {
-          // If Hindi, specifically pick Lekha or hi-IN
           if (lang === "hi") {
             const hindiVoice = voices.find(
               (v) => v.name.includes("Lekha") || v.lang.toLowerCase().includes("hi")
             );
             if (hindiVoice) utterance.voice = hindiVoice;
           } else {
-            // If English, pick Rishi or en-IN
-            const indianEnglishVoice = voices.find(
-              (v) => v.name.includes("Rishi") || v.lang.toLowerCase().includes("en-in")
-            );
-            if (indianEnglishVoice) utterance.voice = indianEnglishVoice;
+            // Prioritize Indian English voices (Rishi, en-IN) or natural English
+            const englishVoice =
+              voices.find((v) => v.name.includes("Rishi") || v.lang.toLowerCase() === "en-in") ||
+              voices.find((v) => v.lang.toLowerCase().startsWith("en"));
+            if (englishVoice) utterance.voice = englishVoice;
           }
         }
 
