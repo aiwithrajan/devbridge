@@ -11,7 +11,7 @@ const SECRET_PATTERNS = [
   // Database connection strings
   /(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"']+/gi,
   // Private keys
-  /-----BEGIN [A-Z ]+ PRIVATE KEY-----[^-]+-----END [A-Z ]+ PRIVATE KEY-----/gs,
+  /-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----/g,
 ];
 
 export function redactSecrets(input: string): string {
