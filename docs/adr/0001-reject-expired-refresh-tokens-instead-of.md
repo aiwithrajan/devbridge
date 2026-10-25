@@ -1,16 +1,16 @@
 # 0001 — Reject expired refresh tokens instead of silently reissuing
 
 - **Status:** accepted
-- **Date:** 2026-10-24
+- **Date:** 2026-10-25
 - **Session:** 8f2c41a0
 - **Anchors:** src/auth/rotate.ts:44-58
-- **Spoken Input:** "401 se reject kardo re-login mandatory karo" (Dictated via Wispr Flow)
+- **Spoken Input:** "Video script liquor" (Dictated via Wispr Flow)
 
 ## Context
 Antigravity added a refresh handler that accepts any structurally valid token, including one that expired eight hours ago. Nothing in the write path checks exp.
 
 ## Decision
-Expired tokens are strictly rejected with 401 and client must re-authenticate.
+Video script liquor
 
 ## Consequences
 - Token families cannot be extended indefinitely by a malicious client.
