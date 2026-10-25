@@ -163,6 +163,8 @@ export default function DevBridgeHome() {
   const [isListening, setIsListening] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedDiskSuccess, setSavedDiskSuccess] = useState<boolean | null>(null);
+  const [isSpeakingBriefing, setIsSpeakingBriefing] = useState(false);
+  const [isSpeakingReply, setIsSpeakingReply] = useState(false);
 
   // Scripted 60-Second Judge Demo state
   const [isDemoRunning, setIsDemoRunning] = useState(false);
@@ -233,13 +235,24 @@ ${diffData.risk}
     }
   };
 
-  // Play spoken briefing in crisp Indian English (Apple Rishi / en-IN)
+  // Play spoken briefing in crisp Indian English (Apple Rishi / en-IN) with overlap prevention
   const playSpokenBriefing = (s: SessionState = session) => {
     soundFX.unlockAudio();
+    if (isSpeakingBriefing) {
+      soundFX.stopSpeech();
+      setIsSpeakingBriefing(false);
+      return;
+    }
+
+    setIsSpeakingBriefing(true);
+    setIsSpeakingReply(false);
+
     const briefingSpeech = register === "beginner"
       ? `Your AI just wrote ${s.linesAdded} lines of code. Warning: at ${s.anchor}, ${s.risk} Question: ${s.question}`
       : `Antigravity generated ${s.linesAdded} lines. Critical vulnerability at ${s.anchor}: ${s.risk} Dilemma: ${s.question}`;
-    soundFX.speakAlert(briefingSpeech, "en");
+    soundFX.speakAlert(briefingSpeech, "en", () => {
+      setIsSpeakingBriefing(false);
+    });
   };
 
   const handleSelectOption = (option: string) => {
@@ -470,6 +483,9 @@ ${normalizedDecision}
   };
 
   const handleReset = () => {
+    soundFX.stopSpeech();
+    setIsSpeakingBriefing(false);
+    setIsSpeakingReply(false);
     setSession(INITIAL_ACTIVE_SESSION);
     setVoiceInput("");
     setIsListening(false);
@@ -488,7 +504,16 @@ ${normalizedDecision}
 
   const replayVoiceReply = () => {
     if (session.voiceReply) {
-      soundFX.speakAlert(session.voiceReply, "en");
+      if (isSpeakingReply) {
+        soundFX.stopSpeech();
+        setIsSpeakingReply(false);
+        return;
+      }
+      setIsSpeakingReply(true);
+      setIsSpeakingBriefing(false);
+      soundFX.speakAlert(session.voiceReply, "en", () => {
+        setIsSpeakingReply(false);
+      });
     }
   };
 
@@ -667,10 +692,23 @@ ${normalizedDecision}
           <div className="flex items-center gap-2">
             <button
               onClick={() => playSpokenBriefing(session)}
-              className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition-colors"
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ${
+                isSpeakingBriefing
+                  ? "border-red-500/40 bg-red-500/10 text-red-300 ring-1 ring-red-500/30"
+                  : "border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300"
+              }`}
             >
-              <Volume2 className="h-3.5 w-3.5" />
-              <span>Listen Briefing (English)</span>
+              {isSpeakingBriefing ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-red-500 animate-ping" />
+                  <span>Stop Briefing</span>
+                </>
+              ) : (
+                <>
+                  <Volume2 className="h-3.5 w-3.5" />
+                  <span>Listen Briefing (English)</span>
+                </>
+              )}
             </button>
             <button
               onClick={handleReset}
@@ -840,10 +878,23 @@ ${normalizedDecision}
                       </div>
                       <button
                         onClick={replayVoiceReply}
-                        className="flex items-center gap-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 px-2 py-0.5 text-[10px] font-mono font-semibold transition-colors"
+                        className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-mono font-semibold transition-colors ${
+                          isSpeakingReply
+                            ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                            : "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300"
+                        }`}
                       >
-                        <Volume2 className="h-3 w-3" />
-                        <span>Replay Voice</span>
+                        {isSpeakingReply ? (
+                          <>
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-ping" />
+                            <span>Stop</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="h-3 w-3" />
+                            <span>Replay Voice</span>
+                          </>
+                        )}
                       </button>
                     </div>
                     <p className="text-xs text-emerald-100 font-mono italic">

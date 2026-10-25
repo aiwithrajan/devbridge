@@ -1,8 +1,10 @@
 // Robust Web Audio + Native macOS Apple Indian Voices (Rishi for en-IN, Lekha for hi-IN) + Browser SpeechSynthesis fallback
+// Guarantees strictly ONE voice plays at any given time with immediate cancellation of prior speech.
 
 class SoundFX {
   private ctx: AudioContext | null = null;
   private isAudioUnlocked = false;
+  private activeUtterance: SpeechSynthesisUtterance | null = null;
 
   unlockAudio() {
     if (this.isAudioUnlocked) return;
@@ -94,8 +96,25 @@ class SoundFX {
     }
   }
 
+  // Instantly halts all ongoing speech across browser and native macOS process
+  stopSpeech() {
+    // 1. Cancel browser speech synthesis
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    // 2. Kill server-side macOS 'say' process if active
+    fetch("/api/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "stop" }),
+    }).catch(() => {});
+  }
+
   // Speaks using native Apple Indian voices or Browser Web Speech API
-  async speakAlert(text: string, lang: "hi" | "en" = "en") {
+  // Cancels any running speech first so double-clicks NEVER produce overlapping voices!
+  async speakAlert(text: string, lang: "hi" | "en" = "en", onEnd?: () => void) {
+    this.stopSpeech();
+
     // 1. Try native macOS server voice first (if running on local Mac)
     try {
       const res = await fetch("/api/speak", {
@@ -105,6 +124,12 @@ class SoundFX {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.localAudio === true) {
+        // Approximate speech duration based on word count (~150 words per minute)
+        const wordCount = text.split(/\s+/).length;
+        const durationMs = Math.max(2000, (wordCount / 150) * 60 * 1000);
+        setTimeout(() => {
+          if (onEnd) onEnd();
+        }, durationMs);
         return;
       }
     } catch {
@@ -112,7 +137,11 @@ class SoundFX {
     }
 
     // 2. Browser SpeechSynthesis Fallback (works on Vercel and all hosted browsers)
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (onEnd) onEnd();
+      return;
+    }
+
     try {
       this.unlockAudio();
       window.speechSynthesis.cancel();
@@ -122,6 +151,13 @@ class SoundFX {
         utterance.rate = 1.0;
         utterance.pitch = 1.0;
 
+        utterance.onend = () => {
+          if (onEnd) onEnd();
+        };
+        utterance.onerror = () => {
+          if (onEnd) onEnd();
+        };
+
         const voices = window.speechSynthesis.getVoices();
         if (voices.length > 0) {
           if (lang === "hi") {
@@ -130,7 +166,6 @@ class SoundFX {
             );
             if (hindiVoice) utterance.voice = hindiVoice;
           } else {
-            // Prioritize Indian English voices (Rishi, en-IN) or natural English
             const englishVoice =
               voices.find((v) => v.name.includes("Rishi") || v.lang.toLowerCase() === "en-in") ||
               voices.find((v) => v.lang.toLowerCase().startsWith("en"));
@@ -138,10 +173,12 @@ class SoundFX {
           }
         }
 
+        this.activeUtterance = utterance;
         window.speechSynthesis.speak(utterance);
       }, 50);
     } catch (e) {
       console.error("speakAlert error:", e);
+      if (onEnd) onEnd();
     }
   }
 }
