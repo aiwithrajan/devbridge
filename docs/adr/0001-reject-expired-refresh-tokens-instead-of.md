@@ -4,13 +4,13 @@
 - **Date:** 2026-10-25
 - **Session:** 8f2c41a0
 - **Anchors:** src/auth/rotate.ts:44-58
-- **Spoken Input:** "Video script liquor" (Dictated via Wispr Flow)
+- **Spoken Input:** "Strictly reject with 401 (forces client re-authentication)" (Dictated via Wispr Flow)
 
 ## Context
 Antigravity added a refresh handler that accepts any structurally valid token, including one that expired eight hours ago. Nothing in the write path checks exp.
 
 ## Decision
-Video script liquor
+Expired tokens are strictly rejected with 401 and the client must re-authenticate. No silent reissue.
 
 ## Consequences
 - Token families cannot be extended indefinitely by a malicious client.
